@@ -32,7 +32,7 @@ extract_data <- function (file_type = '.fcs',
     exprs_data <- list()
     if (file_type == '.fcs'){
         for (i in 1:length(files_list)){
-            exprs_data[[i]] <-as.data.frame(flowCore::read.FCS(files_list[[i]], transformation = FALSE)@exprs)
+            exprs_data[[i]] <-as.data.frame(flowCore::read.FCS(files_list[i], transformation = FALSE)@exprs)
         }}
     if (file_type == '.csv'){
         for (i in 1:length(files_list)){
