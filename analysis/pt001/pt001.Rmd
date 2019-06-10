@@ -1,0 +1,197 @@
+----
+title: "Pt 001 analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setting up the environment
+```{r message=FALSE}
+source("https://raw.githubusercontent.com/msenosainAB/immunophenotyping/master/R/analysis_functions.R")
+env_load()
+```
+
+## Getting k for flowSOM
+```{r}
+data_set <- dir(pattern = ".fcs")
+cols_n <- c("TIGIT", "CD45-RA", "HLA-DR","CD226","CD8","CD3","CD56","LAG3","FoxP3","PD-1","Ki-67", "CD62L")
+fSOM <- ReadInput(data_set, pattern = '.fcs', transform = TRUE,
+                  toTransform = cols_n,
+                  transformFunction = flowCore::arcsinhTransform(a=0, b=0.0067))
+fSOM <- BuildSOM(fSOM, colsToUse = cols_n)
+fSOM <- BuildMST(fSOM, tSNE=FALSE)
+DetermineNumberOfClusters(fSOM$map$codes,max=70,'metaClustering_consensus',plot=T,smooth=0.2, seed=42)
+```
+
+## Running flowSOM
+```{r}
+data_set <- dir(pattern = ".fcs")
+cols_n <- c("TIGIT", "CD45-RA", "HLA-DR","CD226","CD8","CD3","CD56","LAG3","FoxP3","PD-1","Ki-67", "CD62L")
+fSOM <- FlowSOM(data_set,
+                # Input options:
+                compensate = F,transform = TRUE, toTransform=cols_n,
+                transformFunction = flowCore::arcsinhTransform(a=0, b=0.0067), scale = TRUE,
+                # SOM options:
+                colsToUse = cols_n, xdim = 7, ydim = 7,
+                # Metaclustering options:
+                nClus = 16,
+                # Seed for reproducible results:
+                seed = 101)
+PlotStars(fSOM$FlowSOM, backgroundValues = as.factor(fSOM$metaclustering))
+```
+
+
+## Plot by timepoints
+```{r message=FALSE}
+grp <- as.list(data_set)
+names(grp) <- data_set
+groupRes <- CountGroups(fSOM[[1]],
+                        groups=grp,
+                        backgroundValues = as.factor(fSOM$metaclustering))
+```
+
+## Median expression per marker/cluster
+```{r}
+# Generate a dataframe with all info (sample ID, cluster ID)
+# Data
+pt001_fS<- as.data.frame(fSOM$FlowSOM$data)
+# sample id
+pt001_fS['TP_ID'] <- 1
+for (i in 1:length(data_set)){
+    pt001_fS[fSOM$FlowSOM$metaData[[i]][1]:fSOM$FlowSOM$metaData[[i]][2], 'TP_ID'] <- i
+}
+# cluster id
+pt001_fS['cluster_ID'] <- fSOM[[2]][fSOM[[1]]$map$mapping[,1]]
+
+# generate summary table (median expression per cluster per marker)
+flowSOM_median <- aggregate(. ~ cluster_ID, pt001_fS, median)
+flowSOM_median[,'TP_ID'] <- NULL
+flowSOM_median[,2:7] <- NULL
+flowSOM_median[,'Time'] <- NULL
+write.csv(flowSOM_median, file ='flowSOM_median.csv', row.names = F)
+
+# Median expression heatmap
+library(gplots)
+library("RColorBrewer")
+heatmap.2(as.matrix(flowSOM_median[,2:13]),col=rev(brewer.pal(11,"RdBu")), trace="none")
+```
+
+## Assessing the distribution of the data
+```{r}
+# Sample size
+smp_size <- c()
+for (i in 1:length(data_set)){
+  smp_size <- c(smp_size, length(which(pt001_fS$TP_ID==i)))
+}
+barplot(smp_size, names.arg = c(1:length(data_set)), main = 'Sample size')
+
+# Cluster size
+cl_size <- c()
+for (i in 1:length(unique(pt001_fS$cluster_ID))){
+  cl_size <- c(cl_size, length(which(pt001_fS$cluster_ID==i)))
+}
+barplot(cl_size, names.arg = c(1:length(unique(pt001_fS$cluster_ID))), main = 'Cluster size')
+
+# Cluster size w/o cluster 2
+cl_size <- c()
+for (i in 1:length(unique(pt001_fS$cluster_ID))){
+  cl_size <- c(cl_size, length(which(pt001_fS$cluster_ID==i)))
+}
+cl_size <- cl_size[-(2)]
+barplot(cl_size, names.arg = c(1, 3:16), main = 'Cluster size (w/o cluster 2)')
+
+
+# Create dataframe with quantities of clusters and samples
+k <- length(unique(pt001_fS$cluster_ID))
+tp <- length(unique(pt001_fS$TP_ID))
+df_q <- data.frame(matrix(NA, nrow = k, ncol = tp))
+for(i in 1:k){
+  for (ii in 1:tp){
+    df_q[i,ii] <- length(which(pt001_fS$cluster_ID == i & pt001_fS$TP_ID ==ii))
+  }
+}
+colnames(df_q) <- paste('TP_',1:tp, sep = '')
+rownames(df_q) <- paste('cluster_',1:k, sep = '')
+
+# % of cluster per sample
+df_per_tp <- data.frame(matrix(NA, nrow = k, ncol = tp))
+for(i in 1:tp){
+  sum_tp <- sum(df_q[,i])
+  for (ii in 1:k){
+    df_per_tp[ii,i] <- df_q[ii,i]/sum_tp
+  }
+}
+colnames(df_per_tp) <- colnames(df_q)
+rownames(df_per_tp) <- rownames(df_q)
+par(mar = c(4,3,2,7), mgp=c(0,0.8,-0.5))
+barplot(as.matrix(df_per_tp), col = rainbow(tp), las = 2,
+        main = '% of cluster per sample', legend = TRUE,
+        args.legend = list(x = 'right', inset=c(-0.22,0), xpd = TRUE))
+
+# % of cluster per sample (w/o cluster 2)
+df_q_2 <- df_q[-2,]
+df_per_tp <- data.frame(matrix(NA, nrow = k-1, ncol = tp))
+for(i in 1:tp){
+  sum_tp <- sum(df_q_2[,i])
+  for (ii in 1:k-1){
+    df_per_tp[ii,i] <- df_q_2[ii,i]/sum_tp
+  }
+}
+colnames(df_per_tp) <- colnames(df_q)
+rownames(df_per_tp) <- rownames(df_q_2)
+par(mar = c(4,3,2,7), mgp=c(0,0.8,-0.5))
+barplot(as.matrix(df_per_tp), col = rainbow(tp), las = 2,
+        main = '% of cluster per sample (w/o cluster 2)', legend = TRUE,
+        args.legend = list(x = 'right', inset=c(-0.22,0), xpd = TRUE))
+
+# % of sample per cluster
+df_per_k <- data.frame(matrix(NA, nrow = k, ncol = tp))
+for(i in 1:k){
+  sum_k <- sum(df_q[i,])
+  for (ii in 1:tp){
+    df_per_k[i,ii] <- df_q[i,ii]/sum_k
+  }
+}
+colnames(df_per_k) <- paste('TP_',1:tp, sep = '')
+rownames(df_per_k) <- paste('cluster_',1:k, sep = '')
+par(mar = c(5,3,2,7), mgp=c(0,0.8,-0.5))
+barplot(as.matrix(t(df_per_k)), col = rainbow(k), las = 2,
+        main = '% of sample per cluster', legend = TRUE,
+        args.legend = list(x = 'right', inset=c(-0.22,0), xpd = TRUE))
+
+
+```
+
+
+## tSNE plots of the results
+```{r}
+library(magrittr)
+set.seed(1) # for reproducibility
+pt001_smp <- dplyr::sample_n(pt001_fS, size = 20000) #pt001_fS is already transformed
+tsne <- Rtsne::Rtsne(pt001_smp[,7:18], dims = 2, perplexity=30, verbose=TRUE, max_iter = 500)
+
+# visualizing by cluster
+info.norm = tibble(truth = factor(pt001_smp$cluster_ID))
+info.norm %<>% mutate(tsne1 = tsne$Y[, 1], tsne2 = tsne$Y[, 
+    2])
+fs.norm.cent = info.norm %>% group_by(truth) %>% select(tsne1, 
+    tsne2) %>% summarize_all(mean)
+ggplot(info.norm, aes(x = tsne1, y = tsne2, colour = truth)) + 
+    geom_point(alpha = 0.3) + theme_bw() + ggrepel::geom_label_repel(aes(label = truth), 
+    data = fs.norm.cent) + guides(colour = FALSE) + 
+    ggtitle("FlowSOM Clusters (10k sample)")
+
+# visualizing by sample/timepoint
+info.norm = tibble(Timepoint = factor(pt001_smp$TP_ID))
+info.norm %<>% mutate(tsne1 = tsne$Y[, 1], tsne2 = tsne$Y[, 
+    2])
+fs.norm.cent = info.norm %>% group_by(Timepoint) %>% select(tsne1, 
+    tsne2) %>% summarize_all(mean)
+ggplot(info.norm, aes(x = tsne1, y = tsne2, colour = Timepoint)) + 
+    geom_point(alpha = 0.3) + theme_bw() + 
+    guides(point = guide_legend(title = "Timepoint", title.position = "left")) + 
+    ggtitle("Time points Pt001 (10k sample)")
+
+```
