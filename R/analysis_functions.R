@@ -13,6 +13,11 @@ env_load <- function(){
     require(tibble)
     require(FlowSOM)
     require(cytofkit)
+    require(parallel)
+    require(MASS)
+    require(magrittr)
+    require(gplots)
+    require(RColorBrewer)
 }
 
 
@@ -24,8 +29,6 @@ env_load <- function(){
 extract_data <- function (file_type = '.fcs',
                           sampling = F,
                           sample_size = 10) {
-    #file_type <- as.factor(file_type)
-    #setwd(path)
     files_list <- list.files(pattern=file_type)
     if (sampling == T){
         files_list <- sample(files_list, size = sample_size)
@@ -337,3 +340,145 @@ MetaclusterCVs <- function(fsom){
                     }))
     return(CVs)
 }
+
+#---------------------------------------------------------------------------------------
+# FlowSOM in functions
+#---------------------------------------------------------------------------------------
+
+fsom_k <- function(data_set, cols_n, ...){
+    data_set <- dir(pattern = ".fcs")
+    fSOM <- FlowSOM::ReadInput(data_set, pattern = '.fcs', transform = TRUE,
+                  toTransform = cols_n,
+                  transformFunction = flowCore::arcsinhTransform(a=0, b=0.0067))
+    fSOM <- FlowSOM::BuildSOM(fSOM, colsToUse = cols_n)
+    fSOM <- FlowSOM::BuildMST(fSOM, tSNE=FALSE)
+    k <- DetermineNumberOfClusters(fSOM$map$codes,max=50,'metaClustering_consensus',
+        plot=T,smooth=0.2, seed=42)
+    return(k)
+}
+
+fsom_wp <- function(data_set, cols_n, k, ...){
+    x = FlowSOM::FlowSOM(data_set,
+                # Input options:
+                compensate = F,transform = TRUE, toTransform=cols_n,
+                transformFunction = flowCore::arcsinhTransform(a=0, b=0.0067), scale = TRUE,
+                # SOM options:
+                colsToUse = cols_n, xdim = 7, ydim = 7,
+                # Metaclustering options:
+                nClus = k,
+                # Seed for reproducible results:
+                seed = 101)
+    return(x)
+}
+
+#---------------------------------------------------------------------------------------
+# Functions to work with fSOM output
+#---------------------------------------------------------------------------------------
+
+# Extract data and generate a df with sample and cluster ID cols
+fsom_data <- function(fSOM, data_set){
+    pts_fS <- as.data.frame(fSOM$FlowSOM$data)
+    data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
+    
+    # Add sample and cluster id columns
+    pts_fS['TP_ID'] <- 1
+    for (i in 1:length(data_set)){
+    pts_fS[fSOM$FlowSOM$metaData[[i]][1]:fSOM$FlowSOM$metaData[[i]][2], 'TP_ID'] <- data_set_n[i]
+    }
+    pts_fS['cluster_ID'] <- fSOM[[2]][fSOM[[1]]$map$mapping[,1]]
+    return(pts_fS)
+}
+
+
+# Generate a summary table
+cluster_summary <- function(pts_fS, sm_stat = median, write_CSV = TRUE){
+    flowSOM_median <- pts_fS %>%
+                        group_by(cluster_ID) %>%
+                        summarise_if(is.numeric, sm_stat, na.rm = TRUE)
+    if (write_CSV == TRUE) {
+        write.csv(flowSOM_median, file ='flowSOM_median.csv', row.names = F)
+    }
+    return(flowSOM_median)
+}
+
+# Get sample size table
+smp_size <- function(pts_fS, data_set){
+    sample_size <- c()
+    tp_smp <- unique(pts_fS$TP_ID)
+    data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
+    for (i in 1:length(data_set)){
+        sample_size <- c(sample_size, length(which(pts_fS$TP_ID==tp_smp[i])))
+    }
+    df <- data.frame(matrix(NA, nrow = length(data_set_n), ncol = 2))
+    df[,1] <- data_set_n
+    df[,2] <- sample_size
+    colnames(df) <- c('sample_ID', 'size')
+    return(df)
+}
+
+# Get cluster size table
+cl_size <- function(pts_fS){
+    cl_size <- c()
+    for (i in 1:length(unique(pts_fS$cluster_ID))){
+        cl_size <- c(cl_size, length(which(pts_fS$cluster_ID==i)))
+    }
+    df <- data.frame(matrix(NA, nrow = length(cl_size), ncol = 2))
+    df[,1] <- c(1:length(cl_size))
+    df[,2] <- cl_size
+    colnames(df) <- c('cluster_ID', 'size')
+    return(df)
+}
+
+# Generate a table with quantities of clusters and samples
+qnts <- function(pts_fS, data_set, write_CSV = TRUE){
+    data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
+    k <- length(unique(pts_fS$cluster_ID))
+    tp <- length(unique(pts_fS$TP_ID))
+    df_q <- data.frame(matrix(NA, nrow = k, ncol = tp))
+    for(i in 1:k){
+        for (ii in 1:tp){
+            df_q[i,ii] <- length(which(pts_fS$cluster_ID == i & pts_fS$TP_ID == tp_smp[ii]))
+        }   
+    }
+    colnames(df_q) <- data_set_n
+    rownames(df_q) <- paste('cluster_',1:k, sep = '')
+    if (write_CSV == TRUE) {
+        write.csv(df_q, file ='summary_clusters.csv', row.names = F)
+    return(df_q)
+}
+
+# Generate a table with percentages of cluster per sample
+clust_p_smp <- function(pts_fS, df_q, write_CSV = TRUE){
+    k <- length(unique(pts_fS$cluster_ID))
+    tp <- length(unique(pts_fS$TP_ID))
+    df_per_tp <- df_q
+    for(i in 1:tp){
+        sum_tp <- sum(df_q[,i])
+        for (ii in 1:k){
+            df_per_tp[ii,i] <- df_q[ii,i]/sum_tp
+        }
+    }
+    if (write_CSV == TRUE) {
+        write.csv(df_per_tp, file ='summary_clust_p_smp.csv', row.names = F)
+    return(df_per_tp)
+}
+
+
+# Generate a table with percentages of sample per cluster
+smp_p_clust <- function(pts_fS, df_q, write_CSV = TRUE){
+    k <- length(unique(pts_fS$cluster_ID))
+    tp <- length(unique(pts_fS$TP_ID))
+    df_per_k <- df_q
+    for(i in 1:k){
+        sum_k <- sum(df_q[i,])
+        for (ii in 1:tp){
+            df_per_k[i,ii] <- df_q[i,ii]/sum_k
+        }
+    }
+    if (write_CSV == TRUE) {
+        write.csv(df_per_k, file ='summary_smp_p_clust.csv', row.names = F)
+    return(df_per_k)
+}
+
+
+
