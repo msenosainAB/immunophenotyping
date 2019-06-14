@@ -445,6 +445,7 @@ qnts <- function(pts_fS, data_set, write_CSV = TRUE){
     if (write_CSV == TRUE) {
         write.csv(df_q, file ='summary_clusters.csv', row.names = F)
     return(df_q)
+    }
 }
 
 # Generate a table with percentages of cluster per sample
@@ -461,6 +462,7 @@ clust_p_smp <- function(pts_fS, df_q, write_CSV = TRUE){
     if (write_CSV == TRUE) {
         write.csv(df_per_tp, file ='summary_clust_p_smp.csv', row.names = F)
     return(df_per_tp)
+    }
 }
 
 
@@ -478,4 +480,5 @@ smp_p_clust <- function(pts_fS, df_q, write_CSV = TRUE){
     if (write_CSV == TRUE) {
         write.csv(df_per_k, file ='summary_smp_p_clust.csv', row.names = F)
     return(df_per_k)
+    }
 }
