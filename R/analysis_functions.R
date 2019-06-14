@@ -18,6 +18,8 @@ env_load <- function(){
     require(magrittr)
     require(gplots)
     require(RColorBrewer)
+    require(foreach)
+    require(doMC)
 }
 
 
@@ -430,6 +432,7 @@ cl_size <- function(pts_fS){
 }
 
 # Generate a table with quantities of clusters and samples
+## parallelize this!
 qnts <- function(pts_fS, data_set, write_CSV = TRUE){
     data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
     tp_smp <- unique(pts_fS$TP_ID)
@@ -445,6 +448,28 @@ qnts <- function(pts_fS, data_set, write_CSV = TRUE){
     rownames(df_q) <- paste('cluster_',1:k, sep = '')
     if (write_CSV == TRUE) {
         write.csv(df_q, file ='summary_clusters.csv', row.names = F)
+    return(df_q)
+    }
+}
+
+qnts_par <- function(pts_fS, data_set, write_CSV = TRUE, ncores = 50){
+    data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
+    tp_smp     <- unique(pts_fS$TP_ID)
+    k          <- length(unique(pts_fS$cluster_ID))
+    tp         <- length(unique(pts_fS$TP_ID))
+    df_q       <- data.frame(matrix(NA, nrow = k, ncol = tp))
+    cl         <- makeCluster(ncores)
+    registerDoMC(cl)
+    foreach::foreach(i=1:k) %do%{
+        foreach::foreach(ii=1:tp) %do%{
+            df_q[i,ii] <- length(which(pts_fS$cluster_ID == i & pts_fS$TP_ID == tp_smp[ii]))
+        }
+    }
+    colnames(df_q) <- data_set_n
+    rownames(df_q) <- paste('cluster_',1:k, sep = '')
+    if (write_CSV == TRUE) {
+        write.csv(df_q, file ='summary_clusters.csv', row.names = F)
+    stopCluster(cl)
     return(df_q)
     }
 }
