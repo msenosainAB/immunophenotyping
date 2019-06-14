@@ -479,6 +479,3 @@ smp_p_clust <- function(pts_fS, df_q, write_CSV = TRUE){
         write.csv(df_per_k, file ='summary_smp_p_clust.csv', row.names = F)
     return(df_per_k)
 }
-
-
-
