@@ -432,6 +432,7 @@ cl_size <- function(pts_fS){
 # Generate a table with quantities of clusters and samples
 qnts <- function(pts_fS, data_set, write_CSV = TRUE){
     data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
+    tp_smp <- unique(pts_fS$TP_ID)
     k <- length(unique(pts_fS$cluster_ID))
     tp <- length(unique(pts_fS$TP_ID))
     df_q <- data.frame(matrix(NA, nrow = k, ncol = tp))
