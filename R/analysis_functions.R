@@ -20,6 +20,8 @@ env_load <- function(){
     require(RColorBrewer)
     require(foreach)
     require(doMC)
+    require(parallel)
+    require(doParallel)
 }
 
 
@@ -453,23 +455,25 @@ qnts <- function(pts_fS, data_set, write_CSV = TRUE){
 }
 
 qnts_par <- function(pts_fS, data_set, write_CSV = TRUE, ncores = 50){
+    # not working yet :(
     data_set_n <- gsub(".fcs", "", data_set, perl = TRUE)
     tp_smp     <- unique(pts_fS$TP_ID)
     k          <- length(unique(pts_fS$cluster_ID))
     tp         <- length(unique(pts_fS$TP_ID))
     df_q       <- data.frame(matrix(NA, nrow = k, ncol = tp))
     cl         <- makeCluster(ncores)
-    registerDoMC(cl)
-    foreach::foreach(i=1:k) %do%{
-        foreach::foreach(ii=1:tp) %do%{
-            df_q[i,ii] <- length(which(pts_fS$cluster_ID == i & pts_fS$TP_ID == tp_smp[ii]))
+    registerDoParallel(cl)
+    df_q <- foreach::foreach(i=1:k, .combine = 'rbind') %dopar%{
+        foreach::foreach(ii=1:tp, .combine = 'cbind') %dopar%{
+            length(which(pts_fS$cluster_ID == i & pts_fS$TP_ID == tp_smp[ii]))
         }
     }
+    stopCluster(cl)
     colnames(df_q) <- data_set_n
     rownames(df_q) <- paste('cluster_',1:k, sep = '')
     if (write_CSV == TRUE) {
         write.csv(df_q, file ='summary_clusters.csv', row.names = F)
-    stopCluster(cl)
+    
     return(df_q)
     }
 }
@@ -507,4 +511,31 @@ smp_p_clust <- function(pts_fS, df_q, write_CSV = TRUE){
         write.csv(df_per_k, file ='summary_smp_p_clust.csv', row.names = F)
     return(df_per_k)
     }
+}
+
+
+# Creates a list of dataframes per cluster
+dtByCluster <- function(df_q, k){
+  #install_github("mrdwab/SOfun")
+  tp_names_or <- c(unique(sub("^[[:digit:]]_", "\\1", colnames(df_q))))
+  tp_names_or <- SOfun::moveMe(tp_names_or, "C1D15 after C1D8")
+  pt_no <- c(unique(regmatches(colnames(df_q), regexpr("^[[:digit:]]_", colnames(df_q)))))
+  pt_nm <- paste('Pt_00', c(unique(regmatches(colnames(df_q), regexpr("^[[:digit:]]", colnames(df_q))))), sep = '')
+  counts_cl <- list()
+  for (i in 1:k){
+    counts_cl[[i]] <- data.frame(matrix(NA, nrow = length(tp_names_or), ncol = length(pt_no)))
+    colnames(counts_cl[[i]]) <- pt_nm
+    for (ii in 1:length(tp_names_or)){
+      for (y in 1:length(pt_no)){
+        x <- paste(pt_no[y], tp_names_or[[ii]], sep = '')
+        if (is.null(df_q[i,x]) == TRUE){
+          counts_cl[[i]][ii,y] <- NA
+        }
+        else{counts_cl[[i]][ii,y] <- df_q[i,x]}
+      }
+    }
+    counts_cl[[i]]['Timepoint'] <- tp_names_or
+  }
+  counts_cl <- lapply(counts_cl, reshape2::melt, id.vars = 'Timepoint', measure.vars = pt_nm) #reshaping dataframes
+  return(counts_cl)
 }
